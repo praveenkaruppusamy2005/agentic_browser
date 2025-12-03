@@ -2,9 +2,16 @@ import React, { useState } from "react";
 import Modal from "react-modal";
 
 const COLORS = [
-  "#9aa0a6", "#2ecad0", "#df8b6d", "#f5a1c0", "#ff5c64",
-  "#ffa63d", "#f0b12a", "#e6d267", "#b9c46a", "#64a0ff",
-  "#c192f0", "transparent"
+  // Neutrals
+  "#1f2933", "#323f4b", "#9fb3c8",
+  // Blues
+  "#2563eb", "#38bdf8", "#0ea5e9",
+  // Purples / Pinks
+  "#6366f1", "#8b5cf6", "#ec4899",
+  // Warm / Accent
+  "#f97316", "#facc15", "#22c55e",
+  // Transparent / default
+  "transparent"
 ];
 
 export default function Customize({ onClose, onThemeChange, currentColor }) {

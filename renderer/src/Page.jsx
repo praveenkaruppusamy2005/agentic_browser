@@ -1,7 +1,8 @@
 import React, { useRef, useEffect, useState } from "react";
 import "./style.css";
 import defaultLogo from "../icons/default.png";
-
+import Lottie from "lottie-react";
+import animationData from "../../Animations/404.json";
 function ErrorDisplay({ errorInfo }) {
   return (
     <div
@@ -17,8 +18,11 @@ function ErrorDisplay({ errorInfo }) {
         background: '#FFFFFF',
       }}
     >
-      <h1 style={{ color: '#333', marginBottom: '10px' }}>Oops! Page not found.</h1>
-      <p style={{ color: '#666' }}>{errorInfo.desc}</p>
+      <Lottie
+        animationData={animationData}
+        loop={true}
+        style={{ width: '100%', height: '100%' }}
+      />
     </div>
   );
 }
@@ -74,8 +78,10 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
     };
 
     const onFinish = () => {
-      setLoadError(false);
-      setErrorInfo({ desc: '' });
+      // Do not clear error state here.
+      // Successful navigations already clear errors in onStart.
+      // Leaving this as a no-op prevents a late did-finish-load
+      // from racing with did-fail-load and hiding the overlay.
     };
 
     const onFail = (e) => {

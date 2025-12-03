@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, screen } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,9 +28,40 @@ const createWindow = () => {
 
   const startUrl = process.env.ELECTRON_START_URL || `file://${path.join(__dirname, 'index.html')}`;
   win.loadURL(startUrl);
-  win.webContents.on("page-favicon-updated",(event,favicons)=>{
-    win.webContents.send("favicon",favicons[0]);
-  })
+  win.webContents.on("page-favicon-updated", (event, favicons) => {
+    win.webContents.send("favicon", favicons[0]);
+  });
+
+  // Custom maximize behavior:
+  // - First click: window fills the screen work area (best fit) but is NOT truly maximized.
+  // - Second click: window returns to its previous "floating" size and position.
+  let isCustomMaximized = false;
+  let lastNormalBounds = win.getBounds();
+
+  win.on('maximize', () => {
+    try {
+      const { workArea } = screen.getPrimaryDisplay();
+
+      if (!isCustomMaximized) {
+        // Store current bounds to restore later.
+        lastNormalBounds = win.getBounds();
+        isCustomMaximized = true;
+        // Cancel real maximize and resize to work area instead.
+        win.unmaximize();
+        win.setBounds(workArea);
+      } else {
+        // Toggle back to previous floating size.
+        isCustomMaximized = false;
+        win.unmaximize();
+        if (lastNormalBounds) {
+          win.setBounds(lastNormalBounds);
+        }
+      }
+    } catch {
+      // Fallback: ensure we never stay truly maximized.
+      win.unmaximize();
+    }
+  });
 };
 
 app.whenReady().then(() => {
