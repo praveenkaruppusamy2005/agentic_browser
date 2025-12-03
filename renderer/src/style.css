@@ -18,6 +18,7 @@ body,html, #root {
     display: flex;
     flex-direction: column;
     align-items: center;
+    font-family: 'lato';
 
 }
 .profile-modal-anchor {
@@ -86,6 +87,7 @@ body,html, #root {
   position: relative;
   display: flex;
   align-items: center;
+  flex: 1; /* let the input wrapper expand */
 }
 
 .urlbar-input-wrapper .suma-logo {
@@ -104,10 +106,10 @@ body,html, #root {
 .urlbar-input-wrapper input[type="text"],
 .urlbar-input-wrapper input[type="search"] {
   padding-left: 40px;
-  height: 36px;
+  height:35px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: #131515;
+  border: none; /* remove border around input */
+  background: #1c1c1c;
   color: #fff;
   width: 100%;
   box-sizing: border-box;
@@ -118,18 +120,19 @@ body,html, #root {
   position: relative;
   display: flex;
   align-items: center;
+
 }
 
 .input-logo {
-  position: absolute;
-  left: 8px;
+  flex: 1;
+  width: 100%;
   top: 50%;
   transform: translateY(-50%);
   width: 24px;
   height: 24px;
   border-radius: 50%;
   object-fit: cover;
-  pointer-events: none;
+  height: 40px; /* make input taller */
   z-index: 1;
 }
 .icon-btn {
@@ -162,14 +165,13 @@ body,html, #root {
 .urlbar {
   background-color: #131515;
   border-radius: 8px 8px 0 0;
-  height: 46px;
+  height: 50px;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-bottom: none;
   outline: none;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
-  
   gap: 8px;
   width: 99%;
 }
@@ -180,7 +182,7 @@ body,html, #root {
   gap: 8px;
   height: 36px;
   padding: 0 8px;
-  width: 100%;
+  flex: 1; /* occupy remaining space for a larger input */
 }
 
 .icons-btn, .icons-div svg {
@@ -209,18 +211,17 @@ body,html, #root {
 }
 .input {
   flex: 1;
-  width: 80%;
-  background: none;
+  width: 100%;
+  background-color: #ff0000;
   outline: none;
   border: none;
   caret-color: white;
   color: white;
   font-size: 1rem;
-  height: 36px;
+  height: 40px; 
   padding: 0 8px;
   border-radius: 10px;
   font-family: 'lato';
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
   padding-left: 40px; /* space for default logo inside input */
   font-weight: 500;
 }
@@ -322,6 +323,18 @@ body,html, #root {
     display: flex;
     align-items: center;
     justify-content: center;
-
-
+}
+@font-face {
+  font-family: "lato";
+  src: url('../fonts/WorkSans-Regular.ttf') format("truetype");
+}
+.webview
+{
+  width: 100%;
+  height: 100%;
+  display:flex ;
+  flex: 1;
+}
+.error-page{
+  background-color: #ffffff;
 }

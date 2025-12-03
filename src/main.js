@@ -18,12 +18,19 @@ const createWindow = () => {
       height: 35
     },
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      webviewTag: true
     }
+
   });
 
   const startUrl = process.env.ELECTRON_START_URL || `file://${path.join(__dirname, 'index.html')}`;
   win.loadURL(startUrl);
+  win.webContents.on("page-favicon-updated",(event,favicons)=>{
+    win.webContents.send("favicon",favicons[0]);
+  })
 };
 
 app.whenReady().then(() => {

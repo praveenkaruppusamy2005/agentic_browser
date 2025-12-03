@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./style.css";
 
 import rightIcon from "../icons/icons8-chevron-right-100.png";
@@ -11,10 +11,33 @@ import profileIcon from "../icons/icons8-round-100.png";
 import Modal from "react-modal";
 Modal.setAppElement("#root");
 
-export default function UrlBar() {
+export default function UrlBar({ url, setUrl, favicon }) {
   const [openModal, setOpenModal] = useState(false);
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState(url || "");
 
+  const isLikelyUrl = (value) => {
+    if (!value) return false;
+    const test = value.includes("://") ? value : `https://${value}`;
+    try {
+      // Will throw on invalid URL
+      // eslint-disable-next-line no-new
+      new URL(test);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // No direct webview listeners here; Page emits favicon via props
+const goToUrl = () => {
+    let final = (inputValue || "").trim();
+    if (!final) return;
+    if (!/^https?:\/\//i.test(final)) {
+      final = `https://${final}`;
+    }
+    if (!isLikelyUrl(final)) return;
+    setUrl(final);
+  };
   return (
     <div className="urlbar">
 
@@ -33,19 +56,22 @@ export default function UrlBar() {
         </button>
 
         <div className="urlbar-input-wrapper">
-          <img src={defaultLogo} alt="Logo" className="suma-logo" />
+          <img src={favicon || defaultLogo} alt="Logo" className="suma-logo" />
           <input
             className="input"
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder="Ask or Navigate"
+            onChange={(e) => {
+              setInputValue(e.target.value);
+            }}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === "NumpadEnter") && goToUrl()}
+            placeholder="Enter the url"
             type="text"
           />
         </div>
 
       </div>
 
-      {/* Profile + AI Icons */}
+      
       <div className="profile-modal-anchor">
         <div className="profile-div">
           <button className="other">

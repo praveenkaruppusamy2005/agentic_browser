@@ -1,11 +1,6 @@
-// Expose limited APIs to the renderer if needed
-window.addEventListener('DOMContentLoaded', () => {
-  const replaceText = (selector, text) => {
-    const element = document.getElementById(selector);
-    if (element) element.innerText = text;
-  };
+// Use CommonJS in preload to avoid ESM import errors
+const { contextBridge, ipcRenderer } = require("electron");
 
-  replaceText('node-version', process.versions.node);
-  replaceText('chrome-version', process.versions.chrome);
-  replaceText('electron-version', process.versions.electron);
+contextBridge.exposeInMainWorld("api", {
+  onfavicon: (fn) => ipcRenderer.on("favicon", (event, favicon) => fn(favicon)),
 });
