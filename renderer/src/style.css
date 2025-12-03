@@ -18,6 +18,7 @@ body,html, #root {
     display: flex;
     flex-direction: column;
     align-items: center;
+    overflow: hidden;
     font-family: 'lato';
 
 }
@@ -323,6 +324,7 @@ body,html, #root {
     display: flex;
     align-items: center;
     justify-content: center;
+    margin-bottom: 45px;
 }
 @font-face {
   font-family: "lato";
@@ -337,4 +339,52 @@ body,html, #root {
 }
 .error-page{
   background-color: #ffffff;
+}
+
+.customize-modal {
+  background: #232526;
+  border-radius: 16px;
+  box-shadow: 0 4px 32px rgba(0,0,0,0.45);
+  width: 50%;
+  height: 60%;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+}
+.color-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 40px);
+  grid-gap: 12px;
+  margin-top: 8px;
+}
+.color-swatch {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  cursor: pointer;
+  background: #444;
+}
+.color-swatch.selected {
+  position: relative;
+  outline: 2px solid #ffffffaa;
+}
+.swatch-check {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.modal-content1 {
+  padding: 20px;
+  outline: none;
+  justify-content: center;
 }
