@@ -222,9 +222,9 @@ body,html, #root {
   height: 40px; 
   padding: 0 8px;
   border-radius: 10px;
-  font-family: 'lato';
-  padding-left: 40px; /* space for default logo inside input */
-  font-weight: 500;
+  font-family: 'lat';
+  padding-left: 45px; /* space for default logo inside input */
+  font-weight: 200;
 }
 .input::placeholder {
     color: rgb(255, 255, 255,0.5);
@@ -329,6 +329,10 @@ body,html, #root {
 @font-face {
   font-family: "lato";
   src: url('../fonts/WorkSans-Regular.ttf') format("truetype");
+}
+@font-face {
+  font-family: "lat";
+  src: url('../fonts/ElmsSans-Thin.ttf') format("truetype");
 }
 .webview
 {
