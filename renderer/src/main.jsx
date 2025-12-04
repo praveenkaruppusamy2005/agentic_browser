@@ -4,10 +4,24 @@ import './style.css'
 import UrlBar from './UrlBar'
 import Page from './Page'
 import defaultLogo from '../icons/default.png'
+function getInitialUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const startUrl = params.get("startUrl");
+    if (startUrl) {
+      return decodeURIComponent(startUrl);
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return "https://www.google.com";
+}
+
 function App() {
-  const [url, setUrl] = React.useState("https://www.google.com");
+  const [url, setUrl] = React.useState(getInitialUrl);
   const [favicon, setFavicon] = React.useState(defaultLogo);
   const [themeColor, setThemeColor] = React.useState("#000000");
+  const[aiMode, setAiMode] = React.useState(false);
 
   // Load saved theme on mount
   React.useEffect(() => {
@@ -33,8 +47,20 @@ function App() {
   };
   return (
     <div className="app-root" style={{ backgroundColor: hexToRgba(themeColor, 0.6) }}>
-      <UrlBar url={url} setUrl={setUrl} favicon={favicon} onThemeChange={setThemeColor} currentThemeColor={themeColor} />
-      <Page url={url} onFaviconChange={setFavicon} onUrlChange={setUrl} />
+      <UrlBar
+        url={url}
+        setUrl={setUrl}
+        favicon={favicon}
+        onThemeChange={setThemeColor}
+        currentThemeColor={themeColor}
+        setAiMode={setAiMode}
+      />
+      <Page
+        url={url}
+        onFaviconChange={setFavicon}
+        onUrlChange={setUrl}
+        aiMode={aiMode}
+      />
     </div>
   )
 }

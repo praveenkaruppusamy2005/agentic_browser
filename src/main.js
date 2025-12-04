@@ -1,11 +1,11 @@
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, screen, nativeTheme, ipcMain } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const createWindow = () => {
+const createWindow = (initialStartUrl) => {
   const win = new BrowserWindow({
     width: 1000,
     height: 700,
@@ -26,15 +26,25 @@ const createWindow = () => {
 
   });
 
-  const startUrl = process.env.ELECTRON_START_URL || `file://${path.join(__dirname, 'index.html')}`;
+  const baseUrl = process.env.ELECTRON_START_URL || `file://${path.join(__dirname, 'index.html')}`;
+  const startUrl =
+    typeof initialStartUrl === "string" && initialStartUrl.length > 0
+      ? `${baseUrl}?startUrl=${encodeURIComponent(initialStartUrl)}`
+      : baseUrl;
+
   win.loadURL(startUrl);
   win.webContents.on("page-favicon-updated", (event, favicons) => {
     win.webContents.send("favicon", favicons[0]);
   });
 
-  // Custom maximize behavior:
-  // - First click: window fills the screen work area (best fit) but is NOT truly maximized.
-  // - Second click: window returns to its previous "floating" size and position.
+  // Ensure any window.open / popup opens as a full browser UI window
+  // with UrlBar + Page, pointing its internal webview at the target URL.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    createWindow(url);
+    return { action: "deny" };
+  });
+
+
   let isCustomMaximized = false;
   let lastNormalBounds = win.getBounds();
 
@@ -65,7 +75,33 @@ const createWindow = () => {
 };
 
 app.whenReady().then(() => {
+  nativeTheme.themeSource = 'dark';
   createWindow();
+
+  // Popups requested from renderer (e.g., <webview>) arrive here via IPC.
+  // Open them as full browser windows with our UI.
+  ipcMain.on('open-popup-window', (event, url) => {
+    if (typeof url === 'string' && url.length > 0) {
+      createWindow(url);
+    }
+  });
+
+  // For any <webview> guest contents, also force window.open/popups
+  // to open as our full browser window instead of a bare Electron popup.
+  app.on('web-contents-created', (event, contents) => {
+    try {
+      if (contents.getType && contents.getType() === 'webview') {
+        contents.setWindowOpenHandler(({ url }) => {
+          if (typeof url === 'string' && url.length > 0) {
+            createWindow(url);
+          }
+          return { action: 'deny' };
+        });
+      }
+    } catch {
+      // Ignore errors; fall back to default behavior.
+    }
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

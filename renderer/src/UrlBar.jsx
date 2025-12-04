@@ -12,24 +12,37 @@ import Modal from "react-modal";
 import Customize from "./Customize";
 Modal.setAppElement("#root");
 
-export default function UrlBar({ url, setUrl, favicon, onThemeChange, currentThemeColor }) {
+export default function UrlBar({
+  url,
+  setUrl,
+  favicon,
+  onThemeChange,
+  currentThemeColor,
+  setAiMode,
+}) {
   const [openModal, setOpenModal] = useState(false);
   const [inputValue, setInputValue] = useState(url || "");
-    // Format URL for display (hide trailing slash for root paths)
-    const formatForDisplay = (value) => {
-      if (!value) return "";
-      try {
-        const u = new URL(value);
-        const isRoot = (u.pathname === "/" || u.pathname === "") && !u.search && !u.hash;
-        return isRoot ? `${u.protocol}//${u.hostname}` : value;
-      } catch {
-        return value;
-      }
-    };
-    // Keep input in sync when url prop changes (e.g., link clicks)
-    useEffect(() => {
-      setInputValue(formatForDisplay(url || ""));
-    }, [url]);
+
+  // Format URL for display:
+  // - Keep the real URL with protocol (https://...) in state
+  // - Show only the part AFTER "://", e.g. "pinterest.com/..." in the input
+  const formatForDisplay = (value) => {
+    if (!value) return "";
+    try {
+      const u = new URL(value);
+      const href = u.href;
+      const parts = href.split("://");
+      return parts.length > 1 ? parts[1] : href;
+    } catch {
+      // If it's not a full URL string, just strip any leading protocol-like text
+      return value.replace(/^[a-zA-Z]+:\/\//, "");
+    }
+  };
+
+  // Keep input in sync when url prop changes (e.g., navigation from webview)
+  useEffect(() => {
+    setInputValue(formatForDisplay(url || ""));
+  }, [url]);
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const openCustomize = () => {
     setOpenModal(false);
@@ -106,7 +119,14 @@ const goToUrl = () => {
       
       <div className="profile-modal-anchor">
         <div className="profile-div">
-          <button className="other">
+          <button
+            className="other"
+            onClick={() => {
+              if (typeof setAiMode === "function") {
+                setAiMode((p) => !p);
+              }
+            }}
+          >
             <img src={aiIcon} style={{ height: "25px", width: "25px" }} />
           </button>
 

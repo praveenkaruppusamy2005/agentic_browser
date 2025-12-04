@@ -27,7 +27,7 @@ function ErrorDisplay({ errorInfo }) {
   );
 }
 
-export default function Page({ url, onFaviconChange, onUrlChange }) {
+export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false }) {
   const viewRef = useRef(null);
   const [loadError, setLoadError] = useState(false);
   const [errorInfo, setErrorInfo] = useState({ desc: '' });
@@ -115,8 +115,10 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
     if (!view || !onFaviconChange) return;
 
     const handleFavicon = (e) => {
-      const icon = e.favicons?.[0];
-      onFaviconChange(icon || defaultLogo);
+      const raw = e && e.favicons && e.favicons[0];
+      const icon =
+        typeof raw === 'string' && raw.trim().length > 0 ? raw : defaultLogo;
+      onFaviconChange(icon);
       pendingFaviconRef.current = false;
     };
   
@@ -198,6 +200,17 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
     view.addEventListener("will-navigate", handleWillNavigate);
     view.addEventListener("load-commit", handleLoadCommit);
 
+    const handleNewWindow = (e) => {
+      const targetUrl = e && e.url;
+      if (targetUrl && window.api && typeof window.api.openPopupWindow === "function") {
+        window.api.openPopupWindow(targetUrl);
+      }
+      if (e && typeof e.preventDefault === "function") {
+        e.preventDefault();
+      }
+    };
+    view.addEventListener("new-window", handleNewWindow);
+
     return () => {
       view.removeEventListener("page-favicon-updated", handleFavicon);
       
@@ -209,6 +222,7 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
       view.removeEventListener("did-redirect-navigation", handleRedirect);
       view.removeEventListener("will-navigate", handleWillNavigate);
       view.removeEventListener("load-commit", handleLoadCommit);
+      view.removeEventListener("new-window", handleNewWindow);
     };
   }, [onFaviconChange, onUrlChange]);
 
@@ -258,11 +272,17 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
    //   pendingFaviconRef.current = true;
    //   if (onFaviconChange) onFaviconChange(defaultLogo);
 
-   //   // Also clear load error instantly
-   //   setLoadError(false);
-   // }, [url]);
-      return (
-    <div className="page-root" style={{ position: "relative" }}>
+  //   // Also clear load error instantly
+  //   setLoadError(false);
+  // }, [url]);
+  return (
+    <div
+      className="page-root"
+      style={{
+        position: "relative",
+        width: "99%",
+      }}
+    >
       <webview
         ref={viewRef}
         id="browser"
@@ -273,9 +293,10 @@ export default function Page({ url, onFaviconChange, onUrlChange }) {
         partition="persist:browser"
         useragent={desktopUA}
         style={{
-          position: 'absolute',
-          width: '100%',
-          height: '100%',
+          position: "absolute",
+          left: 0,
+          width: aiMode ? "70%" : "100%",
+          height: "100%",
           zIndex: 1,
         }}
       ></webview>
