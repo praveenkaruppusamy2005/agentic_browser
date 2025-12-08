@@ -1,8 +1,9 @@
 import React, { useRef, useEffect, useState } from "react";
+import Lottie from "lottie-react";
+import voiceAnimation from "../../Animations/voice.json";
 import "./style.css";
 import defaultLogo from "../icons/default.png";
-import Lottie from "lottie-react";
-import animationData from "../../Animations/404.json";
+
 function ErrorDisplay({ errorInfo }) {
   return (
     <div
@@ -18,16 +19,13 @@ function ErrorDisplay({ errorInfo }) {
         background: '#FFFFFF',
       }}
     >
-      <Lottie
-        animationData={animationData}
-        loop={true}
-        style={{ width: '100%', height: '100%' }}
-      />
+      <h1 style={{ color: '#333', marginBottom: '10px' }}>Oops! Page not found.</h1>
+      <p style={{ color: '#666' }}>{errorInfo.desc}</p>
     </div>
   );
 }
 
-export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false }) {
+export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, onTitleChange, onLoadingChange, aiMode = false }) {
   const viewRef = useRef(null);
   const [loadError, setLoadError] = useState(false);
   const [errorInfo, setErrorInfo] = useState({ desc: '' });
@@ -37,6 +35,24 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
   const failTimerRef = useRef(null);
   const lastFailRef = useRef({ code: 0, url: "", isMain: false });
   const [preInvalid, setPreInvalid] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+  const toastTimerRef = useRef(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const normalizeUrl = (raw) => {
+    const val = (raw || "").trim();
+    if (!val) return "about:blank";
+    if (/^https?:\/\//i.test(val)) return val;
+    // Treat space-containing inputs as search queries
+    if (/\s/.test(val)) {
+      const q = encodeURIComponent(val);
+      return `https://www.google.com/search?q=${q}`;
+    }
+    // If it looks like a domain (has a dot), prepend https
+    if (/\./.test(val)) return `https://${val}`;
+    // Otherwise, search
+    const q = encodeURIComponent(val);
+    return `https://www.google.com/search?q=${q}`;
+  };
 
   // This is the single source of truth for managing the error overlay.
   // It handles pre-validation, webview load events, and cleanup.
@@ -48,25 +64,17 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
     // 1. Pre-validate the URL before even attempting to load it.
     const val = (url || "").trim();
     if (!val) {
+      // Empty tab: keep blank and no error overlay.
       setPreInvalid(true);
-      setLoadError(true);
-      setErrorInfo({ desc: 'Please enter a URL.' });
+      setLoadError(false);
+      setErrorInfo({ desc: '' });
       if (onFaviconChange) onFaviconChange(defaultLogo);
-      return; // Stop here if URL is empty
+      return;
     }
-    const hasProtocol = /^https?:\/\//i.test(val);
-    const candidate = hasProtocol ? val : `https://${val}`;
-    try {
-      // eslint-disable-next-line no-new
-      new URL(candidate);
-      setPreInvalid(false);
-    } catch {
-      setPreInvalid(true);
-      setLoadError(true);
-      setErrorInfo({ desc: 'The URL format is invalid.' });
-      if (onFaviconChange) onFaviconChange(defaultLogo);
-      return; // Stop here if URL is malformed
-    }
+    // Relax pre-validation: let webview attempt navigation; show overlay only on did-fail-load.
+    // If value looks roughly like a URL, clear preInvalid so webview loads it.
+    const looksUrl = /\./.test(val) || /^https?:\/\//i.test(val);
+    setPreInvalid(!looksUrl);
 
     // 2. If pre-validation passes, attach listeners to the webview.
     const view = viewRef.current;
@@ -75,6 +83,8 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
     const onStart = () => {
       setLoadError(false);
       setErrorInfo({ desc: '' });
+      setIsLoading(true);
+      if (typeof onLoadingChange === 'function') onLoadingChange(true);
     };
 
     const onFinish = () => {
@@ -82,6 +92,11 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
       // Successful navigations already clear errors in onStart.
       // Leaving this as a no-op prevents a late did-finish-load
       // from racing with did-fail-load and hiding the overlay.
+      if (onTitleChange) {
+        onTitleChange(view.getTitle());
+      }
+      setIsLoading(false);
+      if (typeof onLoadingChange === 'function') onLoadingChange(false);
     };
 
     const onFail = (e) => {
@@ -91,10 +106,45 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
       
       // Ignore benign errors like user-cancelled navigations.
       const isTransient = code === -3; // ERR_ABORTED
-      if (!isMain || isTransient) return;
+      if (!isMain || isTransient) {
+        // Ensure loading state is cleared for transient aborts too
+        setIsLoading(false);
+        if (typeof onLoadingChange === 'function') onLoadingChange(false);
+        return;
+      }
+      // If the host might require www, attempt fallback once
+      try {
+        const currentUrl = (view && typeof view.getURL === 'function') ? view.getURL() : (e.validatedURL || e.url || "");
+        if (currentUrl) {
+          const u = new URL(currentUrl);
+          const host = u.host || u.hostname || '';
+          const needsWww = host && !/^www\./i.test(host) && /\./.test(host);
+          if (needsWww) {
+            const wwwHost = `www.${host}`;
+            const fallback = `${u.protocol}//${wwwHost}${u.pathname || ''}${u.search || ''}${u.hash || ''}`;
+            // Avoid infinite loop by marking once per host
+            if (lastHostRef.current !== `www:${host}`) {
+              lastHostRef.current = `www:${host}`;
+              if (onUrlChange) onUrlChange(fallback);
+              // Show a brief toast to indicate retry
+              try {
+                setToastMsg(`Retrying with www: ${wwwHost}`);
+                if (toastTimerRef.current) {
+                  clearTimeout(toastTimerRef.current);
+                }
+                toastTimerRef.current = setTimeout(() => setToastMsg(""), 2500);
+              } catch {}
+              // Do not show error overlay yet; give fallback a chance
+              return;
+            }
+          }
+        }
+      } catch {}
 
       setLoadError(true);
       setErrorInfo({ desc });
+      setIsLoading(false);
+      if (typeof onLoadingChange === 'function') onLoadingChange(false);
       if (onFaviconChange) onFaviconChange(defaultLogo);
     };
 
@@ -107,7 +157,7 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
       view.removeEventListener("did-fail-load", onFail);
       view.removeEventListener("did-finish-load", onFinish);
     };
-  }, [url, onFaviconChange]);
+  }, [url, onFaviconChange, onTitleChange]);
 
   
   useEffect(() => {
@@ -133,13 +183,18 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
         const icon = await view.executeJavaScript(`(function(){
           const links = Array.from(document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'));
           const href = links.length ? links[0].href : '';
-          return href || '';
+          if (!href) {
+            return '/favicon.ico'; // Default path for favicons
+          }
+          return href;
         })()`);
         if (icon && typeof icon === 'string' && icon.trim().length > 0) {
           onFaviconChange(icon);
           pendingFaviconRef.current = false;
         }
-      } catch {}
+      } catch (error) {
+        console.error('Failed to fetch favicon:', error);
+      }
     };
     const handleFinish = () => {
       // After load finishes, if favicon event didn't fire, try DOM extraction
@@ -149,10 +204,30 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
       // no-op for overlay; it's cleared by onFinish in the other effect
     };
 
+    const handleStartLoading = () => {
+      // Mark favicon as pending at the start of any navigation
+      pendingFaviconRef.current = true;
+      // Optimistically set a quick candidate favicon to avoid stale icon
+      try {
+        const currentUrl = (view && typeof view.getURL === 'function') ? view.getURL() : '';
+        if (currentUrl) {
+          const u = new URL(currentUrl);
+          const origin = `${u.protocol}//${u.host}`;
+          const candidate = `${origin}/favicon.ico`;
+          onFaviconChange(candidate);
+        } else {
+          onFaviconChange(defaultLogo);
+        }
+      } catch {
+        try { onFaviconChange(defaultLogo); } catch {}
+      }
+    };
+
     view.addEventListener("page-favicon-updated", handleFavicon);
    
     view.addEventListener("did-fail-load", handleFail);
     view.addEventListener("did-finish-load", handleFinish);
+    view.addEventListener("did-start-loading", handleStartLoading);
 
     const handleNavigate = (e) => {
       console.info('Webview did-navigate', e && e.url);
@@ -199,6 +274,13 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
     view.addEventListener("did-redirect-navigation", handleRedirect);
     view.addEventListener("will-navigate", handleWillNavigate);
     view.addEventListener("load-commit", handleLoadCommit);
+    const handleTitleUpdated = (e) => {
+      try {
+        const title = e && e.title ? e.title : (view && typeof view.getTitle === 'function' ? view.getTitle() : '');
+        if (title && onTitleChange) onTitleChange(title);
+      } catch {}
+    };
+    view.addEventListener("page-title-updated", handleTitleUpdated);
 
     const handleNewWindow = (e) => {
       const targetUrl = e && e.url;
@@ -216,15 +298,17 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
       
       view.removeEventListener("did-fail-load", handleFail);
       view.removeEventListener("did-finish-load", handleFinish);
+      view.removeEventListener("did-start-loading", handleStartLoading);
       view.removeEventListener("did-navigate", handleNavigate);
       view.removeEventListener("did-navigate-in-page", handleNavigateInPage);
       view.removeEventListener("did-start-navigation", handleStartNavigation);
       view.removeEventListener("did-redirect-navigation", handleRedirect);
       view.removeEventListener("will-navigate", handleWillNavigate);
       view.removeEventListener("load-commit", handleLoadCommit);
+      view.removeEventListener("page-title-updated", handleTitleUpdated);
       view.removeEventListener("new-window", handleNewWindow);
     };
-  }, [onFaviconChange, onUrlChange]);
+  }, [onFaviconChange, onUrlChange, onTitleChange]);
 
   // Listen for global navigation control events from UrlBar
   useEffect(() => {
@@ -245,25 +329,34 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
     const backListener = () => onBack();
     const forwardListener = () => onForward();
 
+    const navigateListener = (e) => {
+      try {
+        const target = e && e.detail && e.detail.url ? e.detail.url : '';
+        if (!target) return;
+        const final = normalizeUrl(target);
+        // Only active tab should respond to direct navigate
+        if (isActive && typeof view.loadURL === 'function') {
+          view.loadURL(final);
+        }
+      } catch {}
+    };
+
     document.addEventListener("browser-reload", reloadListener);
     document.addEventListener("browser-back", backListener);
     document.addEventListener("browser-forward", forwardListener);
+    document.addEventListener("browser-navigate", navigateListener);
 
     return () => {
       document.removeEventListener("browser-reload", reloadListener);
       document.removeEventListener("browser-back", backListener);
       document.removeEventListener("browser-forward", forwardListener);
+      document.removeEventListener("browser-navigate", navigateListener);
     };
-  }, []);
+  }, [isActive]);
 
-  useEffect(() => {
-    // When the URL prop changes, it signifies a new navigation intent.
-    // Reset the favicon to default and mark it as pending.
-    pendingFaviconRef.current = true;
-    if (onFaviconChange) {
-      onFaviconChange(defaultLogo);
-    }
-  }, [url, onFaviconChange]);
+  // Do not reset favicon on URL prop change; background webviews may be hidden.
+  // Instead, rely on navigation events (did-start-navigation, page-favicon-updated)
+  // to mark favicon as pending and update when available.
 
    // This effect was too aggressive and caused favicon flickering.
    // The logic is now handled by did-start-navigation.
@@ -277,30 +370,106 @@ export default function Page({ url, onFaviconChange, onUrlChange, aiMode = false
   // }, [url]);
   return (
     <div
-      className="page-root"
-      style={{
-        position: "relative",
-        width: "99%",
-      }}
+      className="page-container"
+      style={{ display: isActive ? 'block' : 'none', position: 'absolute', inset: 0 }}
     >
-      <webview
-        ref={viewRef}
-        id="browser"
-        className="webview"
-        src={preInvalid ? 'about:blank' : url}
-        webpreferences="contextIsolation=yes, nativeWindowOpen=yes"
-        allowpopups="true"
-        partition="persist:browser"
-        useragent={desktopUA}
+      <div
+        className="page-root"
         style={{
-          position: "absolute",
-          left: 0,
-          width: aiMode ? "70%" : "100%",
-          height: "100%",
-          zIndex: 1,
+          position: 'absolute',
+          inset: 0,
+          visibility: isActive ? 'visible' : 'hidden',
+          pointerEvents: isActive ? 'auto' : 'none'
         }}
-      ></webview>
-      {loadError && <ErrorDisplay errorInfo={errorInfo} />}
+      >
+        <webview
+          id={`webview-${id}`}
+          ref={viewRef}
+          src={preInvalid ? 'about:blank' : normalizeUrl(url)}
+          webpreferences="contextIsolation=yes, nativeWindowOpen=yes"
+          allowpopups="true"
+          partition="persist:browser"
+          useragent={desktopUA}
+          style={{
+            position: "absolute",
+            left: 0,
+            width: aiMode ? "70%" : "100%",
+            height: "100%",
+            zIndex: 0,
+          }}
+        ></webview>
+        {aiMode && (
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: "30%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "#131515",
+              borderLeft: "1px solid rgba(255,255,255,0.15)",
+            }}
+          >
+            <Lottie
+              animationData={voiceAnimation}
+              loop={true}
+              style={{ width: "50%", height: "50%" }}
+            />
+          </div>
+        )}
+        {isLoading && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              right: 0,
+              bottom: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+              zIndex: 1000,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                border: '3px solid rgba(255,255,255,0.25)',
+                borderTopColor: '#ffffff',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+              }}
+            />
+            <style>{`
+              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+            `}</style>
+          </div>
+        )}
+        {toastMsg && (
+          <div
+            style={{
+              position: "absolute",
+              right: 12,
+              top: 12,
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: "rgba(0,0,0,0.75)",
+              color: "#fff",
+              fontSize: 12,
+              zIndex: 1001,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            }}
+          >
+            {toastMsg}
+          </div>
+        )}
+        {loadError && <ErrorDisplay errorInfo={errorInfo} />}
+      </div>
     </div>
   );
 }

@@ -19,6 +19,7 @@ export default function UrlBar({
   onThemeChange,
   currentThemeColor,
   setAiMode,
+  isLoading,
 }) {
   const [openModal, setOpenModal] = useState(false);
   const [inputValue, setInputValue] = useState(url || "");
@@ -80,6 +81,11 @@ const goToUrl = () => {
       return;
     }
     setUrl(final);
+    // Also instruct the active webview to navigate immediately
+    try {
+      const evt = new CustomEvent("browser-navigate", { detail: { url: final } });
+      document.dispatchEvent(evt);
+    } catch {}
   };
   return (
     <div className="urlbar">
@@ -95,7 +101,7 @@ const goToUrl = () => {
           <img className="icon" src={rightIcon} alt="Right" draggable="false" />
         </button>
 
-        <button className="icon-btn" onClick={() => document.dispatchEvent(new Event("browser-reload"))}>
+        <button className="icon-btn" onClick={() => document.dispatchEvent(new Event("browser-reload"))} title="Reload">
           <img className="icon" src={refreshIcon} alt="Refresh" draggable="false" />
         </button>
 

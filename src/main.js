@@ -75,7 +75,9 @@ const createWindow = (initialStartUrl) => {
 };
 
 app.whenReady().then(() => {
-  nativeTheme.themeSource = 'dark';
+  // Respect the user's OS theme to avoid forcing dark mode
+  // Options: 'system' | 'light' | 'dark'. Using 'system' prevents unwanted dark styling on sites.
+  nativeTheme.themeSource = 'system';
   createWindow();
 
   // Popups requested from renderer (e.g., <webview>) arrive here via IPC.

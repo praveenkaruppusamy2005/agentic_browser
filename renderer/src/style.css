@@ -149,6 +149,8 @@ body,html, #root {
   height: 28px;
   border-radius: 4px;
   transition: background 0.15s;
+  /* Buttons must remain clickable, not draggable */
+  -webkit-app-region: no-drag;
 }
 .icon-btn:focus {
   outline: none;
@@ -175,6 +177,9 @@ body,html, #root {
   align-items: center;
   gap: 8px;
   width: 99%;
+  margin-top: 10px;
+  /* Make the whole top bar behave like a browser tabs/title bar */
+  -webkit-app-region: drag;
 }
 .icons-div {
   display: flex;
@@ -225,6 +230,8 @@ body,html, #root {
   font-family: 'lat';
   padding-left: 45px; /* space for default logo inside input */
   font-weight: 200;
+  /* Input should be interactive, not part of drag region */
+  -webkit-app-region: no-drag;
 }
 .input::placeholder {
     color: rgb(255, 255, 255,0.5);
@@ -240,11 +247,13 @@ body,html, #root {
     flex-direction: row;
     align-items: center;
     gap: 30px;
+    -webkit-app-region: no-drag;
 }
 .other{
     background: none;
     border: none;
     cursor: pointer;
+    -webkit-app-region: no-drag;
 }
 
 .modal-overlay {
@@ -313,18 +322,16 @@ body,html, #root {
 }
 
 .page-root {
-    height: 100%;
-    width: 99%;
-    background-color:  #131515;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-top: none;
-    outline: none;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
-    border-radius: 0 0 8px 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 45px;
+  height: 100%;
+  width: 100%;
+  background-color: #131515;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y:auto;
 }
 @font-face {
   font-family: "lato";
@@ -338,8 +345,6 @@ body,html, #root {
 {
   width: 100%;
   height: 100%;
-  display:flex ;
-  flex: 1;
 }
 .error-page{
   background-color: #ffffff;
@@ -391,4 +396,134 @@ body,html, #root {
   padding: 20px;
   outline: none;
   justify-content: center;
+}
+
+.tabs-container {
+  display: flex;
+  align-items: center;
+  background-color: transparent;
+  position: absolute;
+  top: 5px;
+  padding: 2px 5px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  -webkit-app-region: drag;
+  padding-right: 140px;
+  margin-left: 15px;
+  gap:2px;
+  
+}
+
+.tabs-list {
+  display: flex;
+  flex-grow: 1;
+  overflow-x: auto;
+  align-items: center;
+    scroll-behavior: smooth; /* smooth horizontal scrolling */
+  /* Hide scrollbar but keep horizontal scroll functionality */
+  scrollbar-width: none; /* Firefox */
+  font-family: 'lat';
+}
+
+/* WebKit-based browsers */
+.tabs-list::-webkit-scrollbar {
+  width: 0px;
+  height: 0px;
+  display: none;
+}
+.new-tab-btn {
+  background-color:transparent;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-left: 5px;
+  /* Buttons must remain clickable */
+  -webkit-app-region: no-drag;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  padding: 5px 8px;
+  background-color: transparent;
+  color: #ccc;
+  margin-right: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 200px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+  margin:2px;
+
+  /* Put transition HERE — the base class */
+  transition: 
+    background-color 0.3s ease,
+    color 0.3s ease,
+    transform 0.4s ease; /* this is the sliding */
+  
+  transform: translateX(0); /* default position */
+}
+
+
+.tab-item.active {
+  background-color: rgba(235, 235, 235,0.4);
+  color: #000000;
+  transform: translateX(10px); /* small slide right */
+  border-radius: 10px;
+}
+
+
+.tab-favicon {
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+}
+
+.tab-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-grow: 1;
+}
+
+.tab-close-btn {
+  background: none;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  margin-left: 8px;
+  font-size: 16px;
+  padding: 0;
+  line-height: 1;
+  -webkit-app-region: no-drag;
+}
+
+.tab-item {
+  opacity: 1;
+  transform: translateX(0);
+  transition: 
+    background-color 0.3s ease,
+    color 0.3s ease,
+    transform 0.3s ease;
+}
+
+/* NEW TAB ENTRY ANIMATION */
+.tab-item.animate {
+  animation: tab-enter 0.25s ease-out;
+}
+
+@keyframes tab-enter {
+  from {
+    opacity: 0;
+    transform: translateX(20px); /* small slide */
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
