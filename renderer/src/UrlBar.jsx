@@ -75,11 +75,14 @@ const goToUrl = () => {
       const q = encodeURIComponent(inputValue.trim());
       final = `https://www.google.com/search?q=${q}`;
     }
+    const displayValue = formatForDisplay(final);
     // If navigating to the same current URL, trigger a reload instead
     if ((url || "").trim() && final.trim() === (url || "").trim()) {
+      setInputValue(displayValue);
       document.dispatchEvent(new Event("browser-reload"));
       return;
     }
+    setInputValue(displayValue);
     setUrl(final);
     // Also instruct the active webview to navigate immediately
     try {

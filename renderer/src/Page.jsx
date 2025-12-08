@@ -29,6 +29,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
   const viewRef = useRef(null);
   const [loadError, setLoadError] = useState(false);
   const [errorInfo, setErrorInfo] = useState({ desc: '' });
+  const [newTabQuery, setNewTabQuery] = useState('');
   const desktopUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
   const lastHostRef = useRef("");
   const pendingFaviconRef = useRef(false);
@@ -38,6 +39,12 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
   const [toastMsg, setToastMsg] = useState("");
   const toastTimerRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
+  const currentUrlRef = useRef(url);
+  const overlayInputRef = useRef(null);
+  useEffect(() => {
+    const val = typeof url === 'string' ? url.trim() : '';
+    currentUrlRef.current = /^about:blank\/?$/i.test(val) ? '' : val;
+  }, [url]);
   const normalizeUrl = (raw) => {
     const val = (raw || "").trim();
     if (!val) return "about:blank";
@@ -54,6 +61,46 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     return `https://www.google.com/search?q=${q}`;
   };
 
+  const initialSrcRef = useRef(null);
+  if (initialSrcRef.current === null) {
+    try {
+      initialSrcRef.current = normalizeUrl(url);
+    } catch {
+      initialSrcRef.current = "about:blank";
+    }
+  }
+
+  const sanitizeTabUrl = (raw) => {
+    const val = (raw || "").trim();
+    if (!val) return "";
+    if (/^about:blank\/?$/i.test(val)) return "";
+    return val;
+  };
+
+  const submitOverlayNavigation = () => {
+    const trimmed = (newTabQuery || '').trim();
+    if (!trimmed) return;
+    const finalUrl = normalizeUrl(trimmed);
+    try {
+      if (typeof onUrlChange === 'function') onUrlChange(finalUrl);
+    } catch {}
+    try {
+      const evt = new CustomEvent('browser-navigate', { detail: { url: finalUrl } });
+      document.dispatchEvent(evt);
+    } catch {}
+    currentUrlRef.current = finalUrl;
+    setPreInvalid(false);
+    setNewTabQuery('');
+  };
+
+  useEffect(() => {
+    const el = overlayInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxHeight = 160;
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+  }, [newTabQuery, preInvalid]);
+
   // This is the single source of truth for managing the error overlay.
   // It handles pre-validation, webview load events, and cleanup.
   useEffect(() => {
@@ -66,6 +113,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     if (!val) {
       // Empty tab: keep blank and no error overlay.
       setPreInvalid(true);
+      setNewTabQuery('');
       setLoadError(false);
       setErrorInfo({ desc: '' });
       if (onFaviconChange) onFaviconChange(defaultLogo);
@@ -79,7 +127,6 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     // 2. If pre-validation passes, attach listeners to the webview.
     const view = viewRef.current;
     if (!view) return;
-
     const onStart = () => {
       setLoadError(false);
       setErrorInfo({ desc: '' });
@@ -88,10 +135,6 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     };
 
     const onFinish = () => {
-      // Do not clear error state here.
-      // Successful navigations already clear errors in onStart.
-      // Leaving this as a no-op prevents a late did-finish-load
-      // from racing with did-fail-load and hiding the overlay.
       if (onTitleChange) {
         onTitleChange(view.getTitle());
       }
@@ -103,7 +146,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       const isMain = e.isMainFrame === true;
       const code = e.errorCode || 0;
       const desc = e.errorDescription || '';
-      
+
       // Ignore benign errors like user-cancelled navigations.
       const isTransient = code === -3; // ERR_ABORTED
       if (!isMain || isTransient) {
@@ -125,7 +168,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
             // Avoid infinite loop by marking once per host
             if (lastHostRef.current !== `www:${host}`) {
               lastHostRef.current = `www:${host}`;
-              if (onUrlChange) onUrlChange(fallback);
+              if (onUrlChange) onUrlChange(sanitizeTabUrl(fallback) || fallback);
               // Show a brief toast to indicate retry
               try {
                 setToastMsg(`Retrying with www: ${wwwHost}`);
@@ -157,17 +200,35 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       view.removeEventListener("did-fail-load", onFail);
       view.removeEventListener("did-finish-load", onFinish);
     };
-  }, [url, onFaviconChange, onTitleChange]);
+  }, [url, onFaviconChange, onTitleChange, onUrlChange, onLoadingChange]);
 
   
   useEffect(() => {
     const view = viewRef.current;
     if (!view || !onFaviconChange) return;
 
+    const resolveFaviconUrl = (raw) => {
+      if (typeof raw !== 'string') return defaultLogo;
+      const trimmed = raw.trim();
+      if (!trimmed) return defaultLogo;
+      try {
+        if (/^data:/i.test(trimmed) || /^https?:/i.test(trimmed)) {
+          return trimmed;
+        }
+        const viewUrl = (view && typeof view.getURL === 'function') ? view.getURL() : '';
+        const base = viewUrl || currentUrlRef.current || '';
+        if (base) {
+          return new URL(trimmed, base).href;
+        }
+        return new URL(trimmed).href;
+      } catch {
+        return trimmed;
+      }
+    };
+
     const handleFavicon = (e) => {
-      const raw = e && e.favicons && e.favicons[0];
-      const icon =
-        typeof raw === 'string' && raw.trim().length > 0 ? raw : defaultLogo;
+      const raw = e && Array.isArray(e.favicons) ? e.favicons.find((item) => typeof item === 'string' && item.trim().length > 0) : '';
+      const icon = resolveFaviconUrl(raw || defaultLogo);
       onFaviconChange(icon);
       pendingFaviconRef.current = false;
     };
@@ -182,14 +243,18 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       try {
         const icon = await view.executeJavaScript(`(function(){
           const links = Array.from(document.querySelectorAll('link[rel~="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'));
-          const href = links.length ? links[0].href : '';
-          if (!href) {
-            return '/favicon.ico'; // Default path for favicons
+          if (links.length) {
+            const href = links[0].href;
+            if (href) return href;
           }
-          return href;
+          try {
+            return new URL('/favicon.ico', window.location.href).href;
+          } catch (err) {
+            return '/favicon.ico';
+          }
         })()`);
         if (icon && typeof icon === 'string' && icon.trim().length > 0) {
-          onFaviconChange(icon);
+          onFaviconChange(resolveFaviconUrl(icon));
           pendingFaviconRef.current = false;
         }
       } catch (error) {
@@ -211,7 +276,13 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       try {
         const currentUrl = (view && typeof view.getURL === 'function') ? view.getURL() : '';
         if (currentUrl) {
+          if (/^about:blank\/?$/i.test(currentUrl)) {
+            currentUrlRef.current = "";
+            onFaviconChange(defaultLogo);
+            return;
+          }
           const u = new URL(currentUrl);
+          currentUrlRef.current = sanitizeTabUrl(u.href) || u.href;
           const origin = `${u.protocol}//${u.host}`;
           const candidate = `${origin}/favicon.ico`;
           onFaviconChange(candidate);
@@ -231,27 +302,50 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
 
     const handleNavigate = (e) => {
       console.info('Webview did-navigate', e && e.url);
-      if (onUrlChange && e && e.url) onUrlChange(e.url);
+      if (e && e.url) {
+        const sanitized = sanitizeTabUrl(e.url);
+        const nextUrl = sanitized === "" ? "" : sanitized;
+        currentUrlRef.current = nextUrl;
+        if (onUrlChange) onUrlChange(nextUrl);
+      }
     };
     const handleNavigateInPage = (e) => {
       console.info('Webview did-navigate-in-page', e && e.url);
-      if (onUrlChange && e && e.url) onUrlChange(e.url);
+      if (e && e.url) {
+        const sanitized = sanitizeTabUrl(e.url);
+        const nextUrl = sanitized === "" ? "" : sanitized;
+        currentUrlRef.current = nextUrl;
+        if (onUrlChange) onUrlChange(nextUrl);
+      }
     };
     const handleRedirect = (e) => {
       console.info('Webview did-redirect-navigation', e && e.url);
-      if (onUrlChange && e && e.url) onUrlChange(e.url);
+      if (e && e.url) {
+        const sanitized = sanitizeTabUrl(e.url);
+        const nextUrl = sanitized === "" ? "" : sanitized;
+        currentUrlRef.current = nextUrl;
+        if (onUrlChange) onUrlChange(nextUrl);
+      }
     };
     const handleWillNavigate = (e) => {
       console.info('Webview will-navigate', e && e.url);
-      if (onUrlChange && e && e.url) onUrlChange(e.url);
+      if (e && e.url) {
+        const sanitized = sanitizeTabUrl(e.url);
+        const nextUrl = sanitized === "" ? "" : sanitized;
+        currentUrlRef.current = nextUrl;
+        if (onUrlChange) onUrlChange(nextUrl);
+      }
     };
     const handleLoadCommit = (e) => {
       // mainFrame load commit includes the current URL reliably
       const isMain = e && e.isMainFrame === true;
       const current = e && e.url;
-      if (isMain && current && onUrlChange) {
+      if (isMain && current) {
         console.info('Webview load-commit (main)', current);
-        onUrlChange(current);
+        const sanitized = sanitizeTabUrl(current);
+        const nextUrl = sanitized === "" ? "" : sanitized;
+        currentUrlRef.current = nextUrl;
+        if (onUrlChange) onUrlChange(nextUrl);
       }
     };
     const handleStartNavigation = (e) => {
@@ -260,12 +354,15 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       if (!e || e.isInPlace || e.isSameDocument) return;
       const target = e.url || "";
       try {
-        const host = new URL(target).host;
+        const urlObj = new URL(target);
+        const host = urlObj.host;
         if (host && host !== lastHostRef.current) {
           lastHostRef.current = host;
           // Mark favicon as pending; we'll update on event or DOM fallback
           pendingFaviconRef.current = true;
         }
+        const sanitized = sanitizeTabUrl(urlObj.href);
+        currentUrlRef.current = sanitized === "" ? "" : sanitized;
       } catch {}
     };
     view.addEventListener("did-navigate", handleNavigate);
@@ -354,6 +451,33 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     };
   }, [isActive]);
 
+  useEffect(() => {
+    if (!isActive) return;
+    const view = viewRef.current;
+    if (!view) return;
+    try {
+      const desired = normalizeUrl(url);
+      if (!desired || desired === 'about:blank') return;
+      const current = typeof view.getURL === 'function' ? view.getURL() : '';
+      if (!current) {
+        view.loadURL(desired);
+        return;
+      }
+      const same = (() => {
+        try {
+          const a = new URL(desired);
+          const b = new URL(current);
+          return a.href === b.href;
+        } catch {
+          return desired === current;
+        }
+      })();
+      if (!same) {
+        view.loadURL(desired);
+      }
+    } catch {}
+  }, [isActive, url]);
+
   // Do not reset favicon on URL prop change; background webviews may be hidden.
   // Instead, rely on navigation events (did-start-navigation, page-favicon-updated)
   // to mark favicon as pending and update when available.
@@ -385,7 +509,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
         <webview
           id={`webview-${id}`}
           ref={viewRef}
-          src={preInvalid ? 'about:blank' : normalizeUrl(url)}
+          src={initialSrcRef.current}
           webpreferences="contextIsolation=yes, nativeWindowOpen=yes"
           allowpopups="true"
           partition="persist:browser"
@@ -396,8 +520,188 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
             width: aiMode ? "70%" : "100%",
             height: "100%",
             zIndex: 0,
+            visibility: preInvalid ? 'hidden' : 'visible',
+            pointerEvents: preInvalid ? 'none' : 'auto',
           }}
         ></webview>
+        {preInvalid && (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '32px',
+              backgroundColor: '#0d0d0d',
+              color: '#f5f5f5',
+              textAlign: 'center',
+              padding: '32px'
+            }}
+          >
+            <div
+              style={{
+                fontSize: '48px',
+                fontWeight: 600,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              New Tab
+            </div>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center'
+                }}
+              >
+              <div
+                style={{
+                  width: 'min(640px, 90vw)',
+                  borderRadius: '22px',
+                  padding: '12px',
+                  background: 'linear-gradient(135deg, rgba(35,35,35,0.95), rgba(20,20,20,0.95))',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  boxShadow: '0 18px 60px rgba(0,0,0,0.45)',
+                  backdropFilter: 'blur(18px)'
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px'
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: '12px',
+                      background: 'rgba(239,68,68,0.18)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="#ef4444"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="11" cy="11" r="7" />
+                      <line x1="16.65" y1="16.65" x2="21" y2="21" />
+                    </svg>
+                  </div>
+                  <div
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start'
+                    }}
+                  >
+                    <textarea
+                      ref={overlayInputRef}
+                      value={newTabQuery}
+                      onChange={(e) => setNewTabQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          submitOverlayNavigation();
+                        }
+                      }}
+                      placeholder="Ask anything. Type @ for mentions or / for shortcuts."
+                      rows={1}
+                      style={{
+                        width: '100%',
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        color: '#f5f5f5',
+                        fontSize: 16,
+                        fontWeight: 500,
+                        lineHeight: '22px',
+                        resize: 'none',
+                        padding: 0,
+                        minHeight: '40px',
+                        maxHeight: '160px',
+                        overflow: 'hidden',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      style={{
+                        width: 36,
+                        height: 36,
+                        borderRadius: '50%',
+                        border: 'none',
+                        background: 'rgba(255,255,255,0.08)',
+                        color: '#f5f5f5',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <svg
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#f5f5f5"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="23" />
+                        <line x1="8" y1="23" x2="16" y2="23" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={submitOverlayNavigation}
+                      style={{
+                        width: 44,
+                        height: 36,
+                        borderRadius: '12px',
+                        border: 'none',
+                        background: '#0ea5e9',
+                        color: '#0b0b0b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        fontSize: 18,
+                        fontWeight: 600
+                      }}
+                    >
+                      <svg
+                        width="18"
+                        height="18"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#0b0b0b"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                        <polyline points="12 5 19 12 12 19" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {aiMode && (
           <div
             style={{
@@ -418,36 +722,6 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
               loop={true}
               style={{ width: "50%", height: "50%" }}
             />
-          </div>
-        )}
-        {isLoading && (
-          <div
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              right: 0,
-              bottom: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-              zIndex: 1000,
-            }}
-          >
-            <div
-              style={{
-                width: 28,
-                height: 28,
-                border: '3px solid rgba(255,255,255,0.25)',
-                borderTopColor: '#ffffff',
-                borderRadius: '50%',
-                animation: 'spin 0.8s linear infinite',
-              }}
-            />
-            <style>{`
-              @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-            `}</style>
           </div>
         )}
         {toastMsg && (

@@ -17,7 +17,7 @@ function getInitialUrl() {
   } catch {
     // ignore and fall back
   }
-  return "https://www.google.com";
+  return "";
 }
 
 function App() {
@@ -27,32 +27,94 @@ function App() {
   const activeTab = tabs.find(tab => tab.id === activeTabId) || tabs[0] || { id: '', url: getInitialUrl(), title: 'New Tab', favicon: defaultLogo };
 
   const handleUrlChange = (tabId, newUrl) => {
+    const raw = typeof newUrl === 'string' ? newUrl.trim() : '';
+    const isBlank = !raw || /^about:blank\/?$/i.test(raw);
+    if (isBlank) {
+      setTabs(prevTabs => {
+        let mutated = false;
+        const next = prevTabs.map(tab => {
+          if (tab.id !== tabId) return tab;
+          const titleChanged = tab.title !== 'New Tab';
+          const urlChanged = tab.url !== '';
+          const faviconChanged = tab.favicon !== defaultLogo;
+          const loadingChanged = tab.loading !== false;
+          if (!titleChanged && !urlChanged && !faviconChanged && !loadingChanged) return tab;
+          mutated = true;
+          return { ...tab, url: '', title: 'New Tab', favicon: defaultLogo, loading: false };
+        });
+        return mutated ? next : prevTabs;
+      });
+      return;
+    }
+
     // Normalize URL by ensuring protocol; set prelim title from hostname.
-    let candidate = newUrl;
-    let nextTitle = 'New Tab';
+    let candidate = raw;
     try {
-      const hasProtocol = /^https?:\/\//i.test(newUrl);
-      candidate = hasProtocol ? newUrl : `https://${newUrl}`;
-      const u = new URL(candidate);
-      nextTitle = (u.host || u.hostname || '').replace(/^www\./i, '') || nextTitle;
+      const hasProtocol = /^https?:\/\//i.test(candidate);
+      candidate = hasProtocol ? candidate : `https://${candidate}`;
     } catch {
       // keep candidate as provided; webview will show validation overlay
     }
-    setTabs(tabs.map(tab => tab.id === tabId ? { ...tab, url: candidate, title: nextTitle } : tab));
+
+    setTabs(prevTabs => {
+      let mutated = false;
+      const next = prevTabs.map(tab => {
+        if (tab.id !== tabId) return tab;
+
+        let nextTitle = tab.title;
+        try {
+          const parsed = new URL(candidate);
+          const hostTitle = (parsed.host || parsed.hostname || '').replace(/^www\./i, '');
+          if (hostTitle) nextTitle = hostTitle;
+        } catch {
+          // leave title as-is if parsing fails
+        }
+
+        const urlChanged = candidate !== tab.url;
+        const titleChanged = nextTitle !== tab.title;
+        if (!urlChanged && !titleChanged) return tab;
+
+        mutated = true;
+        return {
+          ...tab,
+          url: urlChanged ? candidate : tab.url,
+          title: titleChanged ? nextTitle : tab.title,
+        };
+      });
+      return mutated ? next : prevTabs;
+    });
   };
 
   const handleFaviconChange = (tabId, newFavicon) => {
-    setTabs(tabs.map(tab => tab.id === tabId ? { ...tab, favicon: newFavicon } : tab));
+      setTabs(prevTabs => {
+        let mutated = false;
+        const next = prevTabs.map(tab => {
+          if (tab.id !== tabId || tab.favicon === newFavicon) return tab;
+          mutated = true;
+          return { ...tab, favicon: newFavicon };
+        });
+        return mutated ? next : prevTabs;
+      });
   };
 
   const handleTitleChange = (tabId, newTitle) => {
-    setTabs(tabs.map(tab => tab.id === tabId ? { ...tab, title: newTitle } : tab));
+    const raw = typeof newTitle === 'string' ? newTitle.trim() : '';
+    const sanitizedTitle = raw && !/^about:blank\/?$/i.test(raw) ? raw : 'New Tab';
+    setTabs(prevTabs => {
+      let mutated = false;
+      const next = prevTabs.map(tab => {
+        if (tab.id !== tabId || tab.title === sanitizedTitle) return tab;
+        mutated = true;
+        return { ...tab, title: sanitizedTitle };
+      });
+      return mutated ? next : prevTabs;
+    });
   };
 
   const handleNewTab = () => {
     // Create an empty tab; it will stay blank until a URL is entered
     const newTab = { id: uuidv4(), url: '', title: 'New Tab', favicon: defaultLogo, loading: false };
-    setTabs([...tabs, newTab]);
+    setTabs(prevTabs => [...prevTabs, newTab]);
     setActiveTabId(newTab.id);
   };
 
@@ -61,16 +123,18 @@ function App() {
   };
 
   const handleTabClose = (tabId) => {
-    const tabIndex = tabs.findIndex(tab => tab.id === tabId);
-    if (tabs.length <= 1) return; // never remove the final tab
-    const newTabs = tabs.filter(tab => tab.id !== tabId);
-    let nextActiveId = activeTabId;
-    if (activeTabId === tabId) {
-      const nextIndex = Math.min(Math.max(tabIndex, 0), newTabs.length - 1);
-      nextActiveId = newTabs[nextIndex].id;
-    }
-    setTabs(newTabs);
-    setActiveTabId(nextActiveId);
+    setTabs(prevTabs => {
+      if (prevTabs.length <= 1) return prevTabs; // never remove the final tab
+      const tabIndex = prevTabs.findIndex(tab => tab.id === tabId);
+      if (tabIndex === -1) return prevTabs;
+      const newTabs = prevTabs.filter(tab => tab.id !== tabId);
+      setActiveTabId(prevActiveId => {
+        if (prevActiveId !== tabId) return prevActiveId;
+        const nextIndex = Math.min(Math.max(tabIndex, 0), newTabs.length - 1);
+        return newTabs[nextIndex] ? newTabs[nextIndex].id : prevActiveId;
+      });
+      return newTabs;
+    });
   };
 
   const [themeColor, setThemeColor] = React.useState("#000000");
@@ -128,7 +192,15 @@ function App() {
             onFaviconChange={(favicon) => handleFaviconChange(tab.id, favicon)}
             onUrlChange={(url) => handleUrlChange(tab.id, url)}
             onTitleChange={(title) => handleTitleChange(tab.id, title)}
-            onLoadingChange={(loading) => setTabs(tabs.map(t => t.id === tab.id ? { ...t, loading } : t))}
+            onLoadingChange={(loading) => setTabs(prevTabs => {
+              let mutated = false;
+              const next = prevTabs.map(t => {
+                if (t.id !== tab.id || t.loading === loading) return t;
+                mutated = true;
+                return { ...t, loading };
+              });
+              return mutated ? next : prevTabs;
+            })}
             aiMode={aiMode}
           />
         ))}
