@@ -50,31 +50,27 @@ export default function UrlBar({
     setCustomizeOpen(true);
   };
   const closeCustomize = () => setCustomizeOpen(false);
-  const isLikelyUrl = (value) => {
-    if (!value) return false;
-    const test = value.includes("://") ? value : `https://${value}`;
-    try {
-      // Will throw on invalid URL
-      // eslint-disable-next-line no-new
-      new URL(test);
-      return true;
-    } catch {
-      return false;
+  const buildNavigationTarget = (value) => {
+    const trimmed = (value || "").trim();
+    if (!trimmed) return "";
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (/^[a-z]+:\/\//i.test(trimmed)) return trimmed; // allow other schemes
+    if (/\s/.test(trimmed)) {
+      const q = encodeURIComponent(trimmed);
+      return `https://www.google.com/search?q=${q}`;
     }
+    if (/^[\w-]+\.[\w.-]+/.test(trimmed)) {
+      return `https://${trimmed}`;
+    }
+    const q = encodeURIComponent(trimmed);
+    return `https://www.google.com/search?q=${q}`;
   };
 
   // No direct webview listeners here; Page emits favicon via props
 const goToUrl = () => {
-    let final = (inputValue || "").trim();
-    if (!final) return;
-    if (!/^https?:\/\//i.test(final)) {
-      final = `https://${final}`;
-    }
-    // If still not a valid URL, treat input as a search query
-    if (!isLikelyUrl(final)) {
-      const q = encodeURIComponent(inputValue.trim());
-      final = `https://www.google.com/search?q=${q}`;
-    }
+    const target = buildNavigationTarget(inputValue);
+    if (!target) return;
+    const final = target;
     const displayValue = formatForDisplay(final);
     // If navigating to the same current URL, trigger a reload instead
     if ((url || "").trim() && final.trim() === (url || "").trim()) {
@@ -120,6 +116,8 @@ const goToUrl = () => {
             onKeyDown={(e) => (e.key === "Enter" || e.key === "NumpadEnter") && goToUrl()}
             placeholder="Enter the url"
             type="text"
+            autoFocus={true}
+
           />
         </div>
 

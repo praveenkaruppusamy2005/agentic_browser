@@ -18,12 +18,19 @@
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^39.2.4",
-    "vite": "^5.0.10"
+    "vite": "^7.2.7"
   },
   "dependencies": {
+    "@deepgram/sdk": "^4.11.2",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "fs": "^0.0.1-security",
     "lottie-react": "^2.4.1",
+    "multer": "^2.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-modal": "^3.16.3"
+    "react-icons": "^5.5.0",
+    "react-modal": "^3.16.3",
+    "uuid": "^13.0.0"
   }
 }

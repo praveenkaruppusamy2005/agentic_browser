@@ -17,6 +17,7 @@ const createWindow = (initialStartUrl) => {
       symbolColor: '#ffffff',
       height: 35
     },
+    icon: path.join(__dirname, '..', 'renderer', 'icons', 'logo.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -56,7 +57,7 @@ const createWindow = (initialStartUrl) => {
         // Store current bounds to restore later.
         lastNormalBounds = win.getBounds();
         isCustomMaximized = true;
-        // Cancel real maximize and resize to work area instead.
+       
         win.unmaximize();
         win.setBounds(workArea);
       } else {

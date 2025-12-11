@@ -202,6 +202,7 @@ function App() {
               return mutated ? next : prevTabs;
             })}
             aiMode={aiMode}
+            setAiMode={setAiMode}
           />
         ))}
       </div>
