@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import Modal from "react-modal";
+import { FiSun, FiMoon, FiMonitor } from "react-icons/fi";
 
 const COLORS = [
   "#C8CFD2",
@@ -20,7 +21,7 @@ const COLORS = [
 
 
 
-export default function Customize({ onClose, onThemeChange, currentColor }) {
+export default function Customize({ onClose, onThemeChange, currentColor, onThemeModeChange, themeMode = "light", effectiveTheme = "light" }) {
   const [selected, setSelected] = useState(currentColor || null);
 
   const selectColor = (hex) => {
@@ -40,7 +41,31 @@ export default function Customize({ onClose, onThemeChange, currentColor }) {
       className="customize-modal"
     >
       <div className="modal-content">
+        <div className="theme-toggle-group">
+          <button
+            className={`theme-toggle-btn${themeMode === "light" ? " selected" : ""}`}
+            onClick={() => onThemeModeChange && onThemeModeChange("light")}
+          >
+            <FiSun style={{ marginRight: 8 }} />
+            Light
+          </button>
+          <button
+            className={`theme-toggle-btn${themeMode === "dark" ? " selected" : ""}`}
+            onClick={() => onThemeModeChange && onThemeModeChange("dark")}
+          >
+            <FiMoon style={{ marginRight: 8 }} />
+            Dark
+          </button>
+          <button
+            className={`theme-toggle-btn${themeMode === "system" ? " selected" : ""}`}
+            onClick={() => onThemeModeChange && onThemeModeChange("system")}
+          >
+            <FiMonitor style={{ marginRight: 8 }} />
+            System
+          </button>
+        </div>
         <p className="modal-username">Choose a theme color</p>
+        <p className="modal-description">Colors tint tabs when Light mode is active.</p>
         <div className="color-grid">
           {COLORS.map((c) => {
             const base = c === "transparent" ? "#000000" : c;

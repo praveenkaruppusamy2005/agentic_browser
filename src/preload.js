@@ -2,7 +2,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
-  onfavicon: (fn) => ipcRenderer.on("favicon", (event, favicon) => fn(favicon)),
+  onfavicon: (fn) => ipcRenderer.on("favicon", (event, favicons) => fn(favicons)),
 
   /**
    * Ask the main process to open a new top-level browser window
@@ -10,5 +10,12 @@ contextBridge.exposeInMainWorld("api", {
    */
   openPopupWindow: (url) => {
     ipcRenderer.send("open-popup-window", url);
+  },
+  setThemeMode: (mode) => {
+    ipcRenderer.send("set-theme-mode", mode);
+  },
+  runGroq: (text, options = {}) => ipcRenderer.invoke("groq-run", { text, ...options }),
+  onOpenNewTab: (fn) => {
+    ipcRenderer.on('open-new-tab', (_event, url) => fn(url));
   },
 });

@@ -20,6 +20,9 @@ export default function UrlBar({
   currentThemeColor,
   setAiMode,
   isLoading,
+  onThemeModeChange,
+  themeMode,
+  effectiveTheme,
 }) {
   const [openModal, setOpenModal] = useState(false);
   const [inputValue, setInputValue] = useState(url || "");
@@ -87,8 +90,17 @@ const goToUrl = () => {
     } catch {}
   };
   return (
-    <div className="urlbar">
-      {customizeOpen && <Customize onClose={closeCustomize} onThemeChange={onThemeChange} currentColor={currentThemeColor} />}
+    <div className="urlbar" data-theme={effectiveTheme}>
+      {customizeOpen && (
+        <Customize
+          onClose={closeCustomize}
+          onThemeChange={onThemeChange}
+          currentColor={currentThemeColor}
+          onThemeModeChange={onThemeModeChange}
+          themeMode={themeMode}
+          effectiveTheme={effectiveTheme}
+        />
+      )}
       <div className="icons-div">
 
         

@@ -3,7 +3,6 @@ import voiceAnimation from "../../Animations/voice.mp4";
 import "./style.css";
 import defaultLogo from "../icons/default.png";
 
-// Removed AI_SERVICE_BASE as polling is no longer used
 
 function ErrorDisplay({ errorInfo }) {
   return (
@@ -43,16 +42,24 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
   const initialSrcRef = useRef(null);
   // Removed aiPollTimerRef as polling logic is removed
   const [aiListening, setAiListening] = useState(false);
+  const voiceVideoRef = useRef(null);
   
   // State variables for displaying the transcript
   const [aiTranscript, setAiTranscript] = useState(""); // Kept for simplicity/legacy, though partial/final are preferred
   const [aiPartialTranscript, setAiPartialTranscript] = useState(""); 
   const [aiFinalTranscript, setAiFinalTranscript] = useState("");
+  const [displayedText, setDisplayedText] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [aiGroqResponse, setAiGroqResponse] = useState("");
+  const [aiGroqLoading, setAiGroqLoading] = useState(false);
+  const typingTimeoutRef = useRef(null);
   
   const [aiError, setAiError] = useState("");
   const wsRef = useRef(null);
   const audioContextRef = useRef(null);
-  const processorRef = useRef(null);
+  const processorRef = useRef(null); // legacy ScriptProcessor
+  const workletRef = useRef(null);
+  const gainRef = useRef(null);
   const sourceRef = useRef(null);
   
   useEffect(() => {
@@ -60,6 +67,32 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     currentUrlRef.current = /^about:blank\/?$/i.test(val) ? '' : val;
   }, [url]);
   
+  // Listen to favicon events emitted from main via preload (webContents page-favicon-updated)
+  useEffect(() => {
+    if (!isActive) return;
+    const api = window.api;
+    if (!api || typeof api.onfavicon !== "function") return;
+    const handler = (favicons) => {
+      try {
+        let bestFavicon = defaultLogo;
+        if (Array.isArray(favicons) && favicons.length > 1) {
+          bestFavicon = favicons[favicons.length - 1];
+        } 
+        console.log('[Favicon Debug] Favicons received:', favicons);
+        console.log('[Favicon Debug] Best favicon selected:', bestFavicon);
+        if (onFaviconChange) onFaviconChange(bestFavicon);
+      } catch (e) {
+        console.error('[Favicon Debug] Error selecting favicon:', e);
+      }
+    };
+    const maybeRemove = api.onfavicon(handler);
+    return () => {
+      try {
+        if (typeof maybeRemove === "function") maybeRemove();
+      } catch {}
+    };
+  }, [isActive, onFaviconChange]);
+
   const normalizeUrl = (raw) => {
     const val = (raw || "").trim();
     if (!val) return "about:blank";
@@ -124,11 +157,11 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     };
   }, []);
 
-  // Removed clearAiPolling, pollTranscriptOnce, and startTranscriptPolling functions
+
 
   const DEEPGRAM_WS_URL = "ws://127.0.0.1:5002";
   
-  // Memoized function to stop the microphone and Deepgram connection
+ 
   const stopAiMic = useCallback(() => {
     // Stop MediaStreamTracks
     if (sourceRef.current && sourceRef.current.mediaStream) {
@@ -138,6 +171,14 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     if (processorRef.current) {
       processorRef.current.disconnect();
       processorRef.current = null;
+    }
+    if (workletRef.current) {
+      workletRef.current.disconnect();
+      workletRef.current = null;
+    }
+    if (gainRef.current) {
+      gainRef.current.disconnect();
+      gainRef.current = null;
     }
     if (sourceRef.current) {
       sourceRef.current.disconnect();
@@ -155,8 +196,52 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       wsRef.current.close();
       wsRef.current = null;
     }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
     setAiListening(false);
+    setAiPartialTranscript("");
+    setIsTyping(false);
+    setAiGroqResponse("");
+    setAiGroqLoading(false);
   }, []);
+
+  const audioRef = useRef(null);
+  // Track conversation history for contextual AI
+  const [aiHistory, setAiHistory] = useState([]); // {role: 'user'|'assistant', content: string}
+
+  const runGroq = useCallback(async (promptText) => {
+    try {
+      const prompt = (promptText || "").trim();
+      if (!prompt || !(window.api && typeof window.api.runGroq === "function")) return;
+      setAiGroqLoading(true);
+      // Send history to backend for context
+      const resp = await window.api.runGroq(prompt, { history: aiHistory });
+      if (resp && typeof resp === 'object') {
+        setAiGroqResponse(resp.text || "");
+        // Update conversation history
+        setAiHistory(prev => [
+          ...prev,
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: resp.text || "" }
+        ]);
+        if (resp.audio && audioRef.current) {
+          // Play audio from base64 string as a voice agent
+          const audioSrc = `data:audio/mp3;base64,${resp.audio}`;
+          audioRef.current.src = audioSrc;
+          audioRef.current.play().catch(e => console.error('Audio play error:', e));
+        }
+      } else {
+        setAiGroqResponse(resp || "");
+      }
+    } catch (err) {
+      console.error("[Groq] error:", err);
+      setAiGroqResponse("");
+    } finally {
+      setAiGroqLoading(false);
+    }
+  }, [aiHistory]);
 
   // Deepgram live streaming logic - Memoized function to start the mic and WS connection
   const startAiMic = useCallback(async () => {
@@ -164,6 +249,10 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
     setAiTranscript("");
     setAiPartialTranscript("");
     setAiFinalTranscript("");
+    setDisplayedText("");
+    setIsTyping(false);
+    setAiGroqResponse("");
+    setAiGroqLoading(false);
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -172,13 +261,12 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       const source = audioContext.createMediaStreamSource(stream);
       sourceRef.current = source;
       
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      processorRef.current = processor;
-      
       const ws = new window.WebSocket(DEEPGRAM_WS_URL);
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
       
       ws.onopen = () => {
+        console.log("[Deepgram] websocket open");
         setAiListening(true);
         setAiError(""); // Clear error on successful connection
       }
@@ -186,24 +274,37 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          console.log("[Deepgram] raw message:", msg);
           
           if (msg.type === 'transcript' && msg.data && msg.data.channel && msg.data.channel.alternatives) {
             const alt = msg.data.channel.alternatives[0];
-            const transcriptText = alt.transcript || "";
+            const transcriptText = (alt.transcript || "").trim();
+            if (!transcriptText) return;
+            console.log("[Deepgram] transcript:", transcriptText, "is_final:", msg.data.is_final);
             
             // Map Deepgram's is_final flag to update the separate final and partial transcripts
             if (msg.data.is_final) {
               // Append to final transcript and clear partial
-              setAiFinalTranscript(prev => (prev + " " + transcriptText).trim());
-              setAiPartialTranscript(""); 
+              const newFinal = (aiFinalTranscript + " " + transcriptText).trim();
+              setAiFinalTranscript(newFinal);
+              setAiPartialTranscript("");
+              setDisplayedText(newFinal);
+              setIsTyping(false);
+              runGroq(newFinal);
             } else {
               // Update partial transcript for real-time display
               setAiPartialTranscript(transcriptText);
+              // Combine final + partial for display
+              const combined = aiFinalTranscript ? `${aiFinalTranscript} ${transcriptText}` : transcriptText;
+              setDisplayedText(combined);
+              setIsTyping(true);
             }
             setAiTranscript(transcriptText); // Kept for original structure
           } else if (msg.type === 'error') {
             setAiError(`Deepgram Error: ${msg.message}`);
             stopAiMic();
+          } else {
+            console.log("[Deepgram] non-transcript message:", msg);
           }
         } catch (e) {
           console.error("Error parsing WS message:", e);
@@ -211,28 +312,33 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       };
       
       ws.onerror = () => {
+        console.error("[Deepgram] websocket error");
         setAiError('WebSocket connection error (Deepgram server offline?)');
         stopAiMic();
       };
-      ws.onclose = () => setAiListening(false);
+      ws.onclose = () => {
+        console.log("[Deepgram] websocket closed");
+        setAiListening(false);
+        setAiPartialTranscript("");
+      };
 
-      processor.onaudioprocess = (e) => {
-        if (ws.readyState === 1) {
-          // Convert 32-bit float audio buffer to 16-bit PCM (linear16) for Deepgram
-          const input = e.inputBuffer.getChannelData(0);
-          const buffer = new ArrayBuffer(input.length * 2);
-          const view = new DataView(buffer);
-          for (let i = 0; i < input.length; i++) {
-            let s = Math.max(-1, Math.min(1, input[i]));
-            // Set 16-bit integer, true for little-endian encoding
-            view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); 
-          }
-          ws.send(buffer);
+      await audioContext.audioWorklet.addModule(new URL("./audioWorklet.js", import.meta.url));
+      const workletNode = new AudioWorkletNode(audioContext, "pcm-worklet");
+      workletRef.current = workletNode;
+
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 0;
+      gainRef.current = gainNode;
+
+      workletNode.port.onmessage = (event) => {
+        if (wsRef.current && wsRef.current.readyState === 1) {
+          wsRef.current.send(event.data);
         }
       };
-      
-      source.connect(processor);
-      processor.connect(audioContext.destination);
+
+      source.connect(workletNode);
+      workletNode.connect(gainNode);
+      gainNode.connect(audioContext.destination);
       
     } catch (err) {
       setAiError('Mic permission/access error: ' + (err.message || err));
@@ -255,6 +361,30 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       }
     }
   }, [aiMode, aiListening, stopAiMic]);
+
+  // Control the voice animation playback based on mic listening state
+  useEffect(() => {
+    const vid = voiceVideoRef.current;
+    if (!vid) return;
+    if (aiMode && aiListening) {
+      vid.play().catch(() => {});
+    } else {
+      vid.pause();
+      vid.currentTime = 0;
+    }
+  }, [aiMode, aiListening]);
+
+  // Real-time word streaming effect - makes text appear progressively
+  useEffect(() => {
+    if (!aiListening || !displayedText) {
+      setIsTyping(false);
+      return;
+    }
+
+    // When new text arrives, update immediately for real-time feel
+    // The typing cursor will show during partial transcripts
+    setIsTyping(!!aiPartialTranscript);
+  }, [displayedText, aiPartialTranscript, aiListening]);
 
   
   useEffect(() => {
@@ -357,9 +487,22 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
   }, [url, onFaviconChange, onTitleChange, onUrlChange, onLoadingChange]);
 
   
+  // TODO: Favicon fetching is not working properly - see FAVICON_ISSUE.md for details
+  // Known issues: webview events unreliable, CSP/CORS blocking, timing issues
   useEffect(() => {
     const view = viewRef.current;
     if (!view || !onFaviconChange) return;
+
+    const googleFavicon = () => {
+      try {
+        const base = currentUrlRef.current || (view && typeof view.getURL === 'function' ? view.getURL() : '');
+        if (!base) return null;
+        const u = new URL(base);
+        return `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=64`;
+      } catch {
+        return null;
+      }
+    };
 
     const resolveFaviconUrl = (raw) => {
       if (typeof raw !== 'string') return defaultLogo;
@@ -416,9 +559,11 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
       }
     };
     const handleFinish = () => {
-      // After load finishes, if favicon event didn't fire, try DOM extraction
-      if (pendingFaviconRef.current) {
-        fetchFaviconViaDOM();
+      // After load finishes, try DOM extraction and a Google fallback
+      fetchFaviconViaDOM();
+      const g = googleFavicon();
+      if (g) {
+        try { onFaviconChange(g); } catch {}
       }
       // no-op for overlay; it's cleared by onFinish in the other effect
     };
@@ -440,6 +585,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
           const origin = `${u.protocol}//${u.host}`;
           const candidate = `${origin}/favicon.ico`;
           onFaviconChange(candidate);
+          const g = googleFavicon();
+          if (g) onFaviconChange(g);
         } else {
           onFaviconChange(defaultLogo);
         }
@@ -645,8 +792,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
 
   const transcriptBody = aiError
     ? aiError
-    // Display final, otherwise partial, otherwise prompt the user
-    : aiFinalTranscript || aiPartialTranscript || (aiListening ? "Say something..." : ""); 
+    // Display streaming text with typing indicator
+    : displayedText || (aiListening ? "Say something..." : ""); 
 
   return (
     <div
@@ -667,7 +814,6 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
           ref={viewRef}
           src={initialSrcRef.current}
           webpreferences="contextIsolation=yes, nativeWindowOpen=yes"
-          allowpopups="true"
           partition="persist:browser"
           useragent={desktopUA}
           style={{
@@ -678,6 +824,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
             zIndex: 0,
             visibility: preInvalid ? 'hidden' : 'visible',
             pointerEvents: preInvalid ? 'none' : 'auto',
+            background:'var(--page-bg)',
+
           }}
         ></webview>
         {preInvalid && (
@@ -690,11 +838,12 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
               justifyContent: 'center',
               alignItems: 'center',
               gap: '32px',
-              backgroundColor: '#0d0d0d',
-              color: '#f5f5f5',
+             
+              color: 'black',
               textAlign: 'center',
               padding: '32px'
             }}
+           className="preinvalid-backdrop"
           >
             <div
               style={{
@@ -702,6 +851,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                 fontWeight: 600,
                 letterSpacing: '0.04em',
               }}
+            
             >
               How are you feeling today?
             </div>
@@ -717,10 +867,10 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                   width: 'min(640px, 90vw)',
                   borderRadius: '22px',
                   padding: '12px',
-                  background: 'linear-gradient(135deg, rgba(35,35,35,0.95), rgba(20,20,20,0.95))',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  boxShadow: '0 18px 60px rgba(0,0,0,0.45)',
-                  backdropFilter: 'blur(18px)'
+                  background: 'var(--urlbar-bg)',
+                  border: '1px solid var(--urlbar-border)',
+                  boxShadow: '0 18px 60px rgba(0,0,0,0.12)',
+                  backdropFilter: 'blur(12px)'
                 }}
               >
                 <div
@@ -735,7 +885,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                       width: 36,
                       height: 36,
                       borderRadius: '12px',
-                      background: 'rgba(239,68,68,0.18)',
+                      background: 'rgba(239,68,68,0.0)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center'
@@ -746,7 +896,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                       height="18"
                       viewBox="0 0 24 24"
                       fill="none"
-                      stroke="#ef4444"
+                      stroke="#0ea5e9"
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -773,14 +923,14 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                           submitOverlayNavigation();
                         }
                       }}
-                      placeholder="Ask anything. Type @ for mentions or / for shortcuts."
+                      placeholder="Ask anything"
                       rows={1}
                       style={{
                         width: '100%',
                         background: 'transparent',
                         border: 'none',
                         outline: 'none',
-                        color: '#f5f5f5',
+                        color: 'var(--input-text)',
                         fontSize: 16,
                         fontWeight: 500,
                         lineHeight: '22px',
@@ -799,8 +949,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                         height: 36,
                         borderRadius: '50%',
                         border: 'none',
-                        background: 'rgba(255,255,255,0.08)',
-                        color: '#f5f5f5',
+                        background: 'rgba(0,0,0,0.05)',
+                        color: 'var(--input-text)',
                         cursor: 'pointer'
                       }}
                     >
@@ -809,7 +959,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                         height="16"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="#f5f5f5"
+                        stroke="var(--input-text)"
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -827,8 +977,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                         height: 36,
                         borderRadius: '12px',
                         border: 'none',
-                        background: '#0ea5e9',
-                        color: '#0b0b0b',
+                        background: 'none',
+                        color: '#0ea5e9',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -842,7 +992,7 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                         height="18"
                         viewBox="0 0 24 24"
                         fill="none"
-                        stroke="#0b0b0b"
+                        stroke="#0ea5e9"
                         strokeWidth="2"
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -869,7 +1019,8 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
               alignItems: "center",
               justifyContent: "center",
               background: "#000000",
-              borderLeft: "1px solid rgba(255,255,255,0.15)",
+              backdropFilter:'blur(10px)',
+      
               overflow: "hidden"
             }}
           >
@@ -883,13 +1034,11 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                   width: "88%",
                   color: "#f5f5f5",
                   textAlign: "center",
-                  background: "rgba(11,11,11,0.65)",
+                  background: "none",
                   borderRadius: 16,
                   padding: "16px 18px",
                   backdropFilter: "blur(12px)",
-                  border: "1px solid rgba(255,255,255,0.08)",
                   zIndex: 2,
-                  boxShadow: "0 14px 40px rgba(0,0,0,0.4)",
                   maxHeight: "40%",
                   overflowY: "auto",
                 }}
@@ -899,16 +1048,79 @@ export default function Page({ url, id, isActive, onFaviconChange, onUrlChange, 
                     {transcriptHeading}
                   </div>
                 )}
-                <div style={{ fontSize: 16, fontWeight: 500, lineHeight: "22px" }}>{transcriptBody}</div>
+                <div 
+                  style={{ 
+                    fontSize: 16, 
+                    fontWeight: 500, 
+                    lineHeight: "22px",
+                    wordBreak: "break-word",
+                    whiteSpace: "pre-wrap",
+                    transition: "opacity 0.2s ease-in-out"
+                  }}
+                >
+                  {transcriptBody.split(' ').map((word, idx) => (
+                    <span 
+                      key={`word-${idx}-${word.substring(0, 5)}`}
+                      style={{
+                        animation: `fadeInWord 0.25s ease-out ${Math.min(idx * 0.02, 0.5)}s both`,
+                        display: "inline-block",
+                        marginRight: "4px"
+                      }}
+                    >
+                      {word}
+                    </span>
+                  ))}
+                  {isTyping && (
+                    <span 
+                      style={{
+                        display: "inline-block",
+                        width: "2px",
+                        height: "18px",
+                        backgroundColor: "#0ea5e9",
+                        marginLeft: "4px",
+                        animation: "blink 1s infinite",
+                        verticalAlign: "middle"
+                      }}
+                    />
+                  )}
+                </div>
+                {(aiGroqLoading || aiGroqResponse) && (
+                  <div style={{ marginTop: 12, textAlign: "left" }}>
+                    <div style={{ fontSize: 13, opacity: 0.7, marginBottom: 4 }}>Agent</div>
+                    <div style={{ fontSize: 15, lineHeight: "21px", wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
+                      {aiGroqLoading ? "Thinking..." : aiGroqResponse}
+                    </div>
+                    {/* Audio player for Gemini/Deepgram reply */}
+                    <audio ref={audioRef} style={{ display: 'none' }} />
+                  </div>
+                )}
+                <style>{`
+                  @keyframes blink {
+                    0%, 50% { opacity: 1; }
+                    51%, 100% { opacity: 0; }
+                  }
+                  @keyframes fadeInWord {
+                    from {
+                      opacity: 0;
+                      transform: translateY(3px);
+                    }
+                    to {
+                      opacity: 1;
+                      transform: translateY(0);
+                    }
+                  }
+                `}</style>
               </div>
             )}
             <video
+              ref={voiceVideoRef}
               src={voiceAnimation}
-              style={{ width: "100%", height: "100%", objectFit: "contain", borderRadius: 12, zIndex: 0 }}
               autoPlay
+              style={{ width: aiListening?"100%":'50%', height: aiListening?"100%":'300px', objectFit:"contain", borderRadius: 12, zIndex: 0, filter: "blur(1px)",top:'100%'}}
               loop
               muted
               playsInline
+              
             />
             <div
               style={{
